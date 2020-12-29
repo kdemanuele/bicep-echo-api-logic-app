@@ -1,0 +1,153 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "functions": [],
+  "variables": {
+    "workflowSchema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2020-08-01-preview",
+      "name": "storexampleweeu001",
+      "location": "[resourceGroup().location]",
+      "kind": "StorageV2",
+      "sku": {
+        "name": "Standard_LRS",
+        "tier": "Standard"
+      },
+      "properties": {
+        "supportsHttpsTrafficOnly": true,
+        "isHnsEnabled": true,
+        "minimumTlsVersion": "TLS1_2",
+        "accessTier": "Hot"
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2020-08-01-preview",
+      "name": "[format('{0}/default/logicappstore', 'storexampleweeu001')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', 'storexampleweeu001')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/connections",
+      "apiVersion": "2016-06-01",
+      "name": "api-example-weeu-001",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "displayName": "api-example-weeu-001",
+        "parameterValues": {
+          "accountName": "storexampleweeu001",
+          "accessKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', 'storexampleweeu001'), '2019-06-01').keys[0].value]"
+        },
+        "api": {
+          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azureblob')]"
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', 'storexampleweeu001')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "logic-example-weeu-001",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "definition": {
+          "$schema": "[variables('workflowSchema')]",
+          "triggers": {
+            "http_request": {
+              "type": "request",
+              "kind": "http",
+              "inputs": {
+                "schema": {
+                  "$schema": "http://json-schema.org/draft-04/schema#",
+                  "type": "object",
+                  "properties": {
+                    "hello": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "hello"
+                  ]
+                }
+              },
+              "operationOptions": "EnableSchemaValidation"
+            }
+          },
+          "actions": {
+            "HTTP_Response": {
+              "type": "Response",
+              "inputs": {
+                "body": "Hello @{triggerBody()?['hello']}",
+                "headers": {
+                  "Content-Type": "text/plain"
+                },
+                "statusCode": 200
+              },
+              "runAfter": {
+                "Create_Blob": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Create_Blob": {
+              "inputs": {
+                "body": "Hello @{triggerBody()['hello']}",
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['azureblob']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "path": "/datasets/default/files",
+                "queries": {
+                  "folderPath": "/logicappstore",
+                  "name": "@{utcNow()}",
+                  "queryParametersSingleEncoded": true
+                }
+              },
+              "runAfter": {},
+              "runtimeConfiguration": {
+                "contentTransfer": {
+                  "transferMode": "Chunked"
+                }
+              },
+              "type": "ApiConnection"
+            }
+          },
+          "parameters": {
+            "$connections": {
+              "defaultValue": {},
+              "type": "Object"
+            }
+          }
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "azureblob": {
+                "connectionId": "[resourceId('Microsoft.Web/connections', 'api-example-weeu-001')]",
+                "connectionName": "api-example-weeu-001",
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azureblob')]"
+              }
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', 'api-example-weeu-001')]"
+      ]
+    }
+  ],
+  "outputs": {
+    "url": {
+      "type": "string",
+      "value": "[listCallbackURL(concat(resourceId('Microsoft.Logic/workflows', 'logic-example-weeu-001'), '/triggers/http_request'), '2016-06-01').value]"
+    }
+  }
+}
